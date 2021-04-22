@@ -1,0 +1,3 @@
+/tmp/tmp.Ykxr5FFioA/cmake-build-debug-remote/CMakeFiles/rebuild_cache.dir
+/tmp/tmp.Ykxr5FFioA/cmake-build-debug-remote/CMakeFiles/edit_cache.dir
+/tmp/tmp.Ykxr5FFioA/cmake-build-debug-remote/CMakeFiles/minifs.dir

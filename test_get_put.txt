@@ -1,0 +1,14 @@
+#include <stdio.h>
+#include <stdint.h>
+
+struct dir_enitry {
+    uint16_t inode_index;
+    char name[14];
+} __attribute__((__packed__));
+
+int main() {
+    printf("%ld\n", sizeof(struct dir_entry));
+    printf("0x%01X\n", 'a');
+    printf("0x%01X\n", 'b');
+    return 0;
+}
