@@ -1,5 +1,0 @@
-/usr/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=/usr/bin/make -G "CodeBlocks - Unix Makefiles" /tmp/tmp.Ykxr5FFioA
-/home/debugger/code/mipt-linux-minifs-extended/build
--- Configuring done
--- Generating done
--- Build files have been written to: /tmp/tmp.Ykxr5FFioA/cmake-build-debug-remote

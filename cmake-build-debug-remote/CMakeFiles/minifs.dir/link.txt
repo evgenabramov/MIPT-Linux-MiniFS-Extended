@@ -1,1 +1,0 @@
-/usr/bin/cc -fsanitize=address,undefined -g   CMakeFiles/minifs.dir/main.c.o CMakeFiles/minifs.dir/src/fs.c.o CMakeFiles/minifs.dir/src/tokenizer.c.o CMakeFiles/minifs.dir/src/adapter.c.o  -o /home/debugger/code/mipt-linux-minifs-extended/build/minifs 
