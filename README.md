@@ -1,6 +1,14 @@
-# minifs - simple file system
+# minifs extended - simple file system
 
-Tiny model of ext2 file system. You can specify file to store minifs data by script argument. Default value - `filesystem`. If script stops, all data is saved in this file and can be restored by next execution. 
+Tiny model of ext2 file system (version 2.0). 
+All file system data is stored in character device. 
+Driver for this device is a Linux kernel module that defines `open`, 
+`read`, `write` and `seek` operations. Its implementation
+can be found in [`src/driver`](src/driver/minifs_driver.c).
+
+**minifs** has a client-server architecture. 
+Code for both parts is placed in corresponding folders 
+under `/include` and `/src`.
 
 **Note:** all paths should start with `'/'`. Initially only `'/'` path exists.
 
@@ -17,21 +25,56 @@ Tiny model of ext2 file system. You can specify file to store minifs data by scr
 
 ## How to build & execute
 
-CMake/Pure Makefile
+Build and install kernel module:
+
+```bash
+cd src/driver
+make all
+sudo insmod minifs_driver.ko
+```
+
+Check module is installed:
+```bash
+lsmod
+```
+
+Uninstall module:
+```bash
+sudo rmmod minifs_driver.ko
+```
+
+Build client and server applications:
 
 ```bash
 mkdir build; cd build
 cmake ..
 make
-./minifs
+```
+
+Run server:
+```bash
+./server [port = 8080]
+```
+
+Run client:
+```bash
+./client [ip = 127.0.0.1] [port = 8080]
 ```
 
 ## Examples:
 
-(script started at build directory)
+(both server and client scripts are executed from `build` directory)
 
 ```bash
+./server
+```
+
+```bash
+./client
 Welcome to MiniFS!
+User id (for communication with server): 1
+>>> ls /
+/
 >>> touch /file1
 >>> touch /file2
 >>> mkdir /dir1
@@ -46,7 +89,7 @@ dir1
 >>> ls /dir1/dir2
 file3
 dir3
->>> rm /dir1
+>>> rmdir /dir1
 >>> ls /
 /
 file1
@@ -71,6 +114,19 @@ int main() {
     printf("0x%01X\n", 'a');
     printf("0x%01X\n", 'b');
     return 0;
-}>>> put /file3 outer.c
+}
+>>> put /file3 outer.c
 ```
 
+To kill server which is implemented as a daemon program, 
+follow these steps:
+
+1. List listening ports
+```bash
+ss -ltp
+```
+2. Find pid of `server` process in this list
+3. Kill corresponding process
+```bash
+kill -INT <pid>
+```

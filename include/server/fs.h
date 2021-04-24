@@ -54,12 +54,12 @@ int dump_info();
 
 int load_info();
 
-int fs_init(FILE* stream);
+int fs_init(int fs, int fd);
 
 int fs_open(FILE* stream);
 
-// Пишу data в конец файла, ассоциированного с inode_index
-// Если не хватает блоков, добавляю
+// Write data to end of file associated with inode_index
+// If there is not enough blocks then add them
 int write_to_file(char* data, int len, int inode_index);
 
 char* read_file(int inode_index);

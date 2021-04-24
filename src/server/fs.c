@@ -1,15 +1,17 @@
-#include "fs.h"
-
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-FILE* fs;
+#include "server/fs.h"
+#include "common/net_utils.h"
 
-// Для удобства эти данные хранятся и в файле, и в виде структур
-// главное, что в оперативной памяти не хранятся сами блоки
+int fs_fd;
+extern _Thread_local int client_fd;
+
+// For convenience, this data is stored both in a file and in the form of structures.
+// the main idea is that the blocks are not stored in RAM
 struct superblock sb;
 
 int inode_bitmap[INODE_COUNT];
@@ -36,7 +38,7 @@ void free_inode(int inode_index) {
     struct inode* inode = &inode_table[inode_index];
 
     // Clear blocks
-    int block_count = inode->file_len / sb.block_count;
+    int block_count = (int)(inode->file_len / sb.block_count);
     if ((inode->file_len != 0) && (inode->file_len % sb.block_count == 0)) {
         --block_count;
     }
@@ -63,22 +65,20 @@ ssize_t get_free_block_index() {
 
 void free_block(int block_index) {
     // Clear block in memory
-    fseek(fs, DATA_OFFSET + block_index * sb.block_size, SEEK_SET);
+    lseek(fs_fd, DATA_OFFSET + block_index * sb.block_size, SEEK_SET);
     char values[BLOCK_SIZE];
     memset(values, 0, sizeof(values));
-    fwrite(&values[0], 1, sizeof(values), fs);
+    write(fs_fd, &values[0], sizeof(values));
 
     block_bitmap[block_index] = 0;
     ++sb.free_block_count;
 }
 
-// Пишу data в конец файла, ассоциированного с inode_index
-// Если не хватает блоков, добавляю
 int write_to_file(char* data, int len, int inode_index) {
     struct inode* inode = &inode_table[inode_index];
 
     if (inode->file_len + len > sb.block_size * ADDR_COUNT) {
-        fprintf(stdout, "write_to_file: inode address capacity is too small\n");
+        send_failure("write_to_file: inode address capacity is too small", client_fd);
         return -1;
     }
 
@@ -87,7 +87,7 @@ int write_to_file(char* data, int len, int inode_index) {
     if (inode->file_len == 0) {
         ssize_t res;
         if ((res = get_free_block_index()) < 0) {
-            fprintf(stdout, "write_to_file: no free blocks\n");
+            send_failure("write_to_file: no free blocks", client_fd);
             return -1;
         }
         int new_block = res;
@@ -104,7 +104,7 @@ int write_to_file(char* data, int len, int inode_index) {
         if (block_free_space == 0) {
             ssize_t res;
             if ((res = get_free_block_index()) < 0) {
-                fprintf(stdout, "write_to_file: no free blocks\n");
+                send_failure("write_to_file: no free blocks", client_fd);
                 return -1;
             }
             int new_block = res;
@@ -117,8 +117,8 @@ int write_to_file(char* data, int len, int inode_index) {
 
         int block_index = inode->blocks_addr[addr_index];
 
-        fseek(fs, DATA_OFFSET + sb.block_size * block_index + block_filled_space, SEEK_SET);
-        fwrite(data, 1, to_write, fs);
+        lseek(fs_fd, DATA_OFFSET + sb.block_size * block_index + block_filled_space, SEEK_SET);
+        write(fs_fd, data, to_write);
 
         data += to_write;
         remain -= to_write;
@@ -135,7 +135,7 @@ int create_root() {
 
     ssize_t res;
     if ((res = get_free_inode_index()) < 0) {
-        fprintf(stdout, "create_root: no free inodes\n");
+        send_failure("create_root: no free inodes", client_fd);
         return -1;
     }
     root_dir.inode_index = (uint16_t)res;
@@ -150,38 +150,31 @@ int create_root() {
 }
 
 int dump_info() {
-    fseek(fs, SUPERBLOCK_OFFSET, SEEK_SET);
+    lseek(fs_fd, SUPERBLOCK_OFFSET, SEEK_SET);
     // superblock
-    fwrite(&sb, sizeof(struct superblock), 1, fs);
+    write(fs_fd, &sb, sizeof(struct superblock));
 
-    fwrite(&block_bitmap[0], sizeof(int), sb.block_count, fs);
-    fwrite(&inode_bitmap[0], sizeof(int), sb.inode_count, fs);
-    fwrite(&inode_table[0], sb.inode_size, sb.inode_count, fs);
+    write(fs_fd, &block_bitmap[0], sizeof(int) * sb.block_count);
+    write(fs_fd, &inode_bitmap[0], sizeof(int) * sb.inode_count);
+    write(fs_fd, &inode_table[0], sb.inode_size * sb.inode_count);
     return 0;
 }
 
 int load_info() {
-    fseek(fs, SUPERBLOCK_OFFSET, SEEK_SET);
-    fread(&sb, sizeof(struct superblock), 1, fs);
-    fread(&block_bitmap[0], sizeof(int), sb.block_count, fs);
-    fread(&inode_bitmap[0], sizeof(int), sb.inode_count, fs);
-    fread(&inode_table[0], sb.inode_size, sb.inode_count, fs);
+    lseek(fs_fd, SUPERBLOCK_OFFSET, SEEK_SET);
+    read(fs_fd, &sb, sizeof(struct superblock));
+    read(fs_fd, &block_bitmap[0], sizeof(int) * sb.block_count);
+    read(fs_fd, &inode_bitmap[0], sizeof(int) * sb.inode_count);
+    read(fs_fd, &inode_table[0], sb.inode_size * sb.inode_count);
     return 0;
 }
 
-int fs_init(FILE* stream) {
-    fs = stream;
-    setbuf(fs, NULL);
-
-    if (ftruncate(fileno(fs), DATA_OFFSET + BLOCK_COUNT * BLOCK_SIZE) != 0) {
-        fprintf(stdout, "fs_init: unable to truncate file\n");
-        return -1;
-    }
-
-    fseek(fs, 0, SEEK_END);
-    assert(ftell(fs) == DATA_OFFSET + BLOCK_COUNT * BLOCK_SIZE);
-    fseek(fs, 0, SEEK_SET);
-
+int fs_init(int fs, int client) {
+    fs_fd = fs;
+    client_fd = client;
+    
+    lseek(fs_fd, 0, SEEK_SET);
+    
     sb.block_count = BLOCK_COUNT;
     sb.inode_count = INODE_COUNT;
     sb.free_inode_count = INODE_COUNT;
@@ -193,8 +186,8 @@ int fs_init(FILE* stream) {
     int buffer[SUPERBLOCK_OFFSET];
     memset(buffer, 0, sizeof(buffer));
 
-    fseek(fs, 0, SEEK_SET);
-    fwrite(&buffer[0], sizeof(int), sizeof(buffer) / sizeof(int), fs);
+    lseek(fs_fd, 0, SEEK_SET);
+    write(fs_fd, &buffer[0], sizeof(buffer));
 
     memset(&block_bitmap[0], 0, sb.block_count * sizeof(int));
     memset(&inode_bitmap[0], 0, sb.inode_count * sizeof(int));
@@ -203,13 +196,6 @@ int fs_init(FILE* stream) {
     create_root();
 
     dump_info();
-    return 0;
-}
-
-int fs_open(FILE* stream) {
-    fs = stream;
-    setbuf(fs, NULL);
-    load_info();
     return 0;
 }
 
@@ -224,8 +210,8 @@ char* read_file(int inode_index) {
 
         int to_read = (int)((remain < sb.block_size) ? remain : sb.block_size);
 
-        fseek(fs, DATA_OFFSET + block_index * sb.block_size, SEEK_SET);
-        fread(position, 1, to_read, fs);
+        lseek(fs_fd, DATA_OFFSET + block_index * sb.block_size, SEEK_SET);
+        read(fs_fd, position, to_read);
 
         position += to_read;
         remain -= to_read;
@@ -235,6 +221,8 @@ char* read_file(int inode_index) {
     return content;
 }
 
+// TODO: make file structure more flexible
+// TODO: implement filesystem traverse by `cd` command
 ssize_t find_file(char* path) {
     int inode_index = 0;  // root inode index
     for (char* next = strtok(path, "/"); next != NULL; next = strtok(NULL, "/")) {
@@ -274,7 +262,7 @@ int create_at(char* path, int type, char* content) {
     int sep_index = separate_path(path);
 
     if (sep_index == -1) {
-        fprintf(stdout, "create: wrong path\n");
+        send_failure("create: wrong path", client_fd);
         return -1;
     }
 
@@ -293,13 +281,13 @@ int create_at(char* path, int type, char* content) {
 
     ssize_t res;
     if ((res = find_file(basepath)) < 0) {
-        fprintf(stdout, "create_at: basepath not found\n");
+        send_failure("create_at: basepath not found", client_fd);
         return -1;
     }
     int parent_inode = res;
 
     if (inode_table[parent_inode].type != DIR) {
-        fprintf(stdout, "create_at: not a directory\n");
+        send_failure("create_at: not a directory", client_fd);
         return -1;
     }
 
@@ -307,7 +295,7 @@ int create_at(char* path, int type, char* content) {
     struct dir_entry new_entry;
     strcpy(new_entry.name, name);
     if ((res = get_free_inode_index()) < 0) {
-        fprintf(stdout, "create_at: no free inodes\n");
+        send_failure("create_at: no free inodes", client_fd);
         return -1;
     }
     new_entry.inode_index = res;
@@ -349,7 +337,7 @@ int remove_at(char* path) {
     int sep_index = separate_path(path);
 
     if (sep_index == -1) {
-        fprintf(stdout, "create: wrong path\n");
+        send_failure("create: wrong path", client_fd);
         return -1;
     }
 
@@ -363,7 +351,7 @@ int remove_at(char* path) {
 
     ssize_t res;
     if ((res = find_file(basepath)) < 0) {
-        fprintf(stdout, "mkdir: basepath not found\n");
+        send_failure("mkdir: basepath not found", client_fd);
         return -1;
     }
     int parent_inode = res;
@@ -371,7 +359,7 @@ int remove_at(char* path) {
     struct inode* parent = &inode_table[parent_inode];
 
     if (parent->type != DIR) {
-        fprintf(stdout, "remove: basepath is not a directory\n");
+        send_failure("remove: basepath is not a directory", client_fd);
         return -1;
     }
 
@@ -388,7 +376,7 @@ int remove_at(char* path) {
         }
     }
     if (index == -1) {
-        fprintf(stdout, "remove: file not found");
+        send_failure("remove: file not found", client_fd);
         return -1;
     }
 
@@ -412,7 +400,7 @@ int remove_at(char* path) {
 
     // Remove inode
     if (remove_inode(inode_remove) != 0) {
-        fprintf(stdout, "remove: failed to remove inode\n");
+        send_failure("remove: failed to remove inode", client_fd);
         return -1;
     }
 

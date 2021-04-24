@@ -1,4 +1,4 @@
-#include "tokenizer.h"
+#include "common/tokenizer.h"
 
 void tokenizer_init(struct tokenizer* tokenizer, char* line) {
     tokenizer->token_count = 0;
